@@ -1,4 +1,4 @@
-use druid::widget::{Flex, TextBox, List, Label, Controller, Scope, ViewSwitcher};
+use druid::widget::{Flex, TextBox, List, Label, Controller, Scope, ViewSwitcher, Scroll};
 use druid::{AppLauncher, Color, Data, PlatformError, Widget, WidgetExt, LensExt, WindowDesc, Lens, EventCtx, Event, Env, lens};
 use druid::im::{vector,Vector};
 use std::rc::Rc;
@@ -61,8 +61,51 @@ impl Lens<(Vector<Rc<String>>,String), Vector<Rc<String>>> for FilteredLens {
 }
 
 
+type Filter = Rc<String>;
+type PickItem = Rc<String>;
+type PickData = (Vector<PickItem>, Option<PickItem>);
+
+#[derive(Clone, Data, Lens, Debug)]
+struct FilteredSelectionState {
+  filter: String,
+  sel_index: Option<usize>,
+  list: Vector<Rc<String>>,
+  selection: Option<Rc<String>>
+}
+
+impl FilteredSelectionState {
+  pub fn new((list, selection): PickData) -> Self {
+    FilteredSelectionState {
+      filter: "".into(),
+      sel_index: None,
+      list,
+      selection
+    }
+
+  }
+}
+
 fn main() -> Result<(), PlatformError> {
-  let main_window = WindowDesc::new(ui_builder());
+  let list_widget = picklist( || {
+    ViewSwitcher::new(
+      |data: &(Option<Rc<String>>, Rc<String>), _env: &_|
+        if let (Some(sel), item) = data { sel == item } else { false },
+      |selected: &bool, _data: &(Option<Rc<String>>, Rc<String>), _env: &_| {
+        let label = Label::new(|data: &(Option<Rc<String>>, Rc<String>), _env: &_| {
+          let (_sel, item) = data;
+          (**item).clone()
+        });
+
+        if *selected { label.expand_width().border(Color::GREEN, 2.0).boxed() }
+        else { label.expand_width().border(Color::BLUE, 2.0).boxed() }
+      }
+    )
+  })
+    .lens(( AppData::list, AppData::selected))
+    .controller(DoneKeys{})
+    .controller(EnterPrints{});
+
+  let main_window = WindowDesc::new(list_widget);
   let data = AppData{
     selected: None,
     list: vector!(
@@ -73,72 +116,49 @@ fn main() -> Result<(), PlatformError> {
   };
 
   AppLauncher::with_window(main_window)
-    .log_to_console()
+    //.log_to_console() // XXX if env DEBUG=true
     .launch(data)
 }
 
-#[derive(Clone, Data, Lens, Debug)]
-struct FilteredSelectionState {
-  filter: String,
-  sel_index: Option<usize>,
-  app_data: AppData
-}
+// TODO:
+// 1. Nicer layout - nicer "selected" appearance
+// 2. Mouse events - click to select;
+// 3. ? double click to select & exit...
+// 4. Build for Linux/Mac/Win
+// Reuse!
+// 5. Focus Picklist => focus FilterText (and v/v)
+// 6. Abstract off Strings - ideally be able to use e.g. a name or whatever in a struct
 
-impl FilteredSelectionState {
-  pub fn new(app_data: AppData) -> Self {
-    FilteredSelectionState {
-      filter: "".into(),
-      sel_index: None,
-      app_data
-    }
-
-  }
-}
-
-fn ui_builder() -> impl Widget<AppData> {
+fn picklist<W: Widget<(Option<PickItem>, Filter)> + 'static>(wf: impl Fn() -> W + 'static) -> impl Widget<PickData> {
   let filter = TextBox::new()
+    .expand_width()
     .lens(lens!((FilteredSelectionState, _), 0).then(FilteredSelectionState::filter))
     .controller(TakeFocus{});
 
-  let list = List::new(|| {
-    ViewSwitcher::new(
-      |data: &(Option<Rc<String>>, Rc<String>), _env: &_|
-        if let (Some(sel), item) = data { sel == item } else { false },
-      |selected: &bool, _data: &(Option<Rc<String>>, Rc<String>), _env: &_| {
-        let label = Label::new(|data: &(Option<Rc<String>>, Rc<String>), _env: &_| {
-          let (_sel, item) = data;
-          (**item).clone()
-        });
-
-        if *selected { label.border(Color::GREEN, 2.0).boxed() }
-        else { label.boxed() }
-      }
-    )
-  })
+  let list = List::new(wf)
   .lens((
-      lens!((FilteredSelectionState, _), 0).then(FilteredSelectionState::app_data.then(AppData::selected)),
+      lens!((FilteredSelectionState, _), 0).then(FilteredSelectionState::selection),
       lens!((_, Vector<Rc<String>>), 1)
     ));
 
 
   let flex = Flex::column()
     .with_child(filter)
-    .with_child(list)
+    .with_child(Scroll::new(list).vertical())
     .controller(MoveSelection{})
-    .controller(DoneKeys{})
     .lens((
       lens::Identity{},
       (
-        FilteredSelectionState::app_data.then(AppData::list),
+        FilteredSelectionState::list,
         FilteredSelectionState::filter
       ).then(FilteredLens{})
     ));
 
   Scope::from_lens(
     FilteredSelectionState::new,
-    FilteredSelectionState::app_data,
+    (FilteredSelectionState::list, FilteredSelectionState::selection),
     flex
-  ).controller(EnterPrints{})
+  )
 }
 
 struct MoveSelection;
@@ -147,12 +167,11 @@ struct MoveSelection;
 type MoveSelData = (FilteredSelectionState, Vector<Rc<String>>);
 
 impl<W: Widget<MoveSelData>> Controller<MoveSelData, W> for MoveSelection {
+  #[instrument(skip(self, child, ctx, event, data, env))]
   fn event(&mut self, child: &mut W, ctx: &mut EventCtx, event: &Event, data: &mut MoveSelData, env: &Env) {
     use druid::{KeyEvent,KbKey};
-    let span = span!(Level::INFO, "MoveSelection");
-    let _entered = span.enter();
     //event!(Level::DEBUG, "{:?}/{:?}", event, data);
-
+    //
     let (fss, list) = data;
 
     match (event, fss.sel_index.clone()) {
@@ -170,7 +189,7 @@ impl<W: Widget<MoveSelData>> Controller<MoveSelData, W> for MoveSelection {
     }
 
     if let Some(idx) = fss.sel_index {
-      fss.app_data.selected = list.get(idx).cloned();
+      fss.selection = list.get(idx).cloned();
     }
 
     child.event(ctx, event, data, env);
@@ -180,21 +199,23 @@ impl<W: Widget<MoveSelData>> Controller<MoveSelData, W> for MoveSelection {
 struct TakeFocus;
 
 impl<T, W: Widget<T>> Controller<T, W> for TakeFocus {
-    fn event(&mut self, child: &mut W, ctx: &mut EventCtx, event: &Event, data: &mut T, env: &Env) {
-      let span = span!(Level::INFO, "TakeFocus");
-      let _entered = span.enter();
-      // event!(Level::DEBUG, "{:?}", event);
+  #[instrument(skip(self, child, ctx, event, data, env))]
+  fn event(&mut self, child: &mut W, ctx: &mut EventCtx, event: &Event, data: &mut T, env: &Env) {
+    let span = span!(Level::INFO, "TakeFocus");
+    let _entered = span.enter();
+    // event!(Level::DEBUG, "{:?}", event);
 
-      if let Event::WindowConnected = event {
-          ctx.request_focus();
-      }
-      child.event(ctx, event, data, env)
+    if let Event::WindowConnected = event {
+        ctx.request_focus();
     }
+    child.event(ctx, event, data, env)
+  }
 }
 
 struct EnterPrints;
 
 impl<W: Widget<AppData>> Controller<AppData, W> for EnterPrints {
+  #[instrument(skip(self, child, ctx, event, data, env))]
   fn event(&mut self, child: &mut W, ctx: &mut EventCtx, event: &Event, data: &mut AppData, env: &Env) {
     use druid::{KeyEvent,KbKey};
 
@@ -213,12 +234,13 @@ impl<W: Widget<AppData>> Controller<AppData, W> for EnterPrints {
 struct DoneKeys;
 
 impl<T, W: Widget<T>> Controller<T, W> for DoneKeys {
+  #[instrument(skip(self, child, ctx, event, data, env))]
   fn event(&mut self, child: &mut W, ctx: &mut EventCtx, event: &Event, data: &mut T, env: &Env) {
     use druid::{KeyEvent,KbKey,Application};
 
     let span = span!(Level::INFO, "DoneKeys");
     let _entered = span.enter();
-    // event!(Level::DEBUG, "{:?}/{:?}", event, data);
+    //event!(Level::DEBUG, "{:?}", event);
 
     child.event(ctx, event, data, env);
     match event {
