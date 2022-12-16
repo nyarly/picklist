@@ -12,8 +12,12 @@ fuzzy-matcher = "0.3.7"
 similar = { version = "2.2.1", default-features = false }
 simple_logger = "4.0.0"
 tracing = "0.1.37"
+anyhow = "1.0.66"
 
 [lib]
 
 [[bin]]
 name = "quickpick"
+
+[profile.release]
+debug = true

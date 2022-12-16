@@ -28,6 +28,7 @@
         gdk-pixbuf
         atk
         gtk3
+        inferno
       ];
     };
   });

@@ -908,6 +908,7 @@ dependencies = [
 name = "picklist"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "druid",
  "fuzzy-matcher",
  "similar",

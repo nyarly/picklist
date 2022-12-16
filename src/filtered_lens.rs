@@ -1,10 +1,7 @@
 use druid::{ Data, Lens };
-use druid::im::Vector;
 use std::rc::Rc;
 
 use fuzzy_matcher::skim::SkimMatcherV2;
-
-pub struct FilteredLens { }
 
 #[derive(Clone, Data, Debug)]
 struct FilterMatch<T: Data>{
@@ -30,34 +27,40 @@ impl<T: FuzzyMatchable> FuzzyMatchable for Rc<T> {
   }
 }
 
+#[derive(Default)]
+pub struct FilteredLens {
+  matcher: SkimMatcherV2
+}
+
 impl FilteredLens {
-  fn match_items<L, F, V>(&self, list: &L, filter: &F) -> Vector<FilterMatch<V>>
-where L: Data+IntoIterator<Item = V>,
+  fn match_items<'a, L, F, V>(&'a self, list: &L, filter: &'a F) -> impl Iterator<Item=FilterMatch<V>> + '_
+where
+    L: Data+IntoIterator<Item = V>,
     F: FuzzyMatchable,
     V: Data+FuzzyMatchable
   {
-    let matcher = SkimMatcherV2::default();
     let f = filter.match_against();
     // XXX clone, collect
     list.clone().into_iter().enumerate().filter_map(|(index, text)| {
       let t = text.match_against();
-      matcher.fuzzy(t, f, false).map(|(score,_)| FilterMatch{text: text.clone(), index, score})
-    }).collect()
+      self.matcher.fuzzy(t, f, false).map(|(score,_)| FilterMatch{text, index, score})
+    })
   }
 }
 
-impl<I, Q, L> Lens<(L,Q), L> for FilteredLens
+impl<L, M, Q, I> Lens<(L,Q), M> for FilteredLens
 where I: Data+FuzzyMatchable,
   Q: FuzzyMatchable,
-  L: Data+IntoIterator<Item=I>+FromIterator<I>
+  L: Data+IntoIterator<Item=I>,
+  M: Data+FromIterator<I>
 {
-  fn with<V, F: FnOnce(&L) -> V>(&self, (list, filter): &(L, Q), f: F) -> V {
-    let matches = self.match_items(list, filter).iter().map(|fm| fm.text.clone()).collect();
+  fn with<V, F: FnOnce(&M) -> V>(&self, (list, filter): &(L, Q), f: F) -> V {
+    let matches = self.match_items(list, filter).map(|fm| fm.text).collect();
     f(&matches)
   }
 
-  fn with_mut<V, F: FnOnce(&mut L) -> V>(&self, (list, filter): &mut (L, Q), f: F) -> V {
-    let mut matches = self.match_items(list, filter).iter().map(|fm| fm.text.clone()).collect();
+  fn with_mut<V, F: FnOnce(&mut M) -> V>(&self, (list, filter): &mut (L, Q), f: F) -> V {
+    let mut matches = self.match_items(list, filter).map(|fm| fm.text).collect();
     f(&mut matches)
   }
 }

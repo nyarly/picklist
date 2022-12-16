@@ -67,7 +67,7 @@ where Sel: Data+Default+FuzzyMatchable
       (
         FilteredSelectionState::list,
         FilteredSelectionState::filter
-      ).then(FilteredLens{})
+      ).then::<_, Vector<Sel>>(FilteredLens::default())
     ));
 
   Scope::from_lens(

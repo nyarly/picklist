@@ -3,7 +3,6 @@ use druid::{
   AppLauncher,
   Color,
   Data,
-  PlatformError,
   WidgetExt,
   WindowDesc,
   Lens,
@@ -11,7 +10,7 @@ use druid::{
   Event,
   Env,
 };
-use druid::im::{vector,Vector};
+use druid::im::Vector;
 use std::rc::Rc;
 use tracing::{span,  Level, instrument};
 
@@ -28,7 +27,7 @@ struct AppData {
 // 2. Mouse events - click to select;
 // 3. ? double click to select & exit...
 // 4. Build for Linux/Mac/Win
-fn main() -> Result<(), PlatformError> {
+fn main() -> Result<(), anyhow::Error> {
   let list_widget = picklist::picklist( || {
     ViewSwitcher::new(
       |data: &(Option<Rc<String>>, Rc<String>), _env: &_|
@@ -47,18 +46,18 @@ fn main() -> Result<(), PlatformError> {
     .controller(TakeFocus{});
 
   let main_window = WindowDesc::new(list_widget);
+  let list = std::io::stdin().lines().try_fold(vec![], |mut vec, line| {
+    vec.push(Rc::new(line?));
+    Ok::<_,std::io::Error>(vec)
+  })?;
   let data = AppData{
     selected: None,
-    list: vector!(
-      Rc::new("foobar".into()),
-      Rc::new("foobaz".into()),
-      Rc::new("foofarah".into())
-    )
+    list: list.into()
   };
 
-  AppLauncher::with_window(main_window)
+  Ok(AppLauncher::with_window(main_window)
     //.log_to_console() // XXX if env DEBUG=true
-    .launch(data)
+    .launch(data)?)
 }
 
 struct EnterPrints;
