@@ -24,6 +24,7 @@ use druid::im::Vector;
 use tracing::{instrument,debug,info};
 
 type PickData<Sel> = (Option<Sel>, Vector<Sel>);
+type PickItem<Sel> = (Option<Sel>, (Sel, RichText));
 
 #[derive(Clone, Data, Lens, Debug)]
 struct FilteredSelectionState<Sel: Clone> {
@@ -56,7 +57,7 @@ where
     .with_id(filter_id)
     .controller(GetFocus{});
 
-  let list = List::new(wf)
+  let list = List::new(move || wf().controller(ScrollSelected))
     .lens((
       lens!((FilteredSelectionState<Sel>, _), 0).then(FilteredSelectionState::selection),
       lens!((_, Vector<(Sel, RichText)>), 1)
@@ -99,6 +100,20 @@ impl<Sel: Clone> Selectable<Sel> for Vector<Sel> {
 
   fn len(&self) -> usize {
     self.len()
+  }
+}
+
+struct ScrollSelected;
+
+impl<Sel: Clone + PartialEq, W: Widget<PickItem<Sel>>> Controller<PickItem<Sel>, W> for ScrollSelected {
+  #[instrument(name="ScrollSelected", skip(self, child, ctx, old, data, env))]
+  fn update(&mut self, child: &mut W, ctx: &mut UpdateCtx, old: &PickItem<Sel>, data: &PickItem<Sel>, env: &Env) {
+    if let (Some(sel), (item, _)) = data {
+      if sel == item {
+        ctx.scroll_to_view()
+      }
+    }
+    child.update(ctx, old, data, env)
   }
 }
 
